@@ -2,18 +2,15 @@ package ru.musintimur.dynamicstorage.screens.main
 
 import android.app.Activity
 import android.app.Application
-import android.graphics.Rect
-import android.util.DisplayMetrics
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import kotlinx.coroutines.*
 import ru.musintimur.dynamicstorage.objects.Figure.Good
 import ru.musintimur.dynamicstorage.objects.Figure.Worker
+import ru.musintimur.dynamicstorage.objects.graphic.ScreenHelper
 
-private const val DEFAULT_SCREEN_SIZE = 100
-
-class MainActivityViewModel(private val app: Application, private var metrics: DisplayMetrics) : AndroidViewModel(app) {
+class MainActivityViewModel(private val app: Application, private val screenHelper: ScreenHelper) : AndroidViewModel(app) {
 
     private val _goods = MutableLiveData<List<Good>>()
     private val _workers = MutableLiveData<List<Worker>>()
@@ -32,7 +29,12 @@ class MainActivityViewModel(private val app: Application, private var metrics: D
                     val newGoods = mutableListOf<Good>()
 
                     repeat(10) {
-                        newGoods.add(Good(app.applicationContext, calculateViewSize(), getRandomX(), getRandomY()))
+                        newGoods.add(
+                            Good(app.applicationContext,
+                                screenHelper.calculateViewSize(),
+                                screenHelper.getRandomX(),
+                                screenHelper.getRandomY())
+                        )
                     }
 
                     _goods.postValue(newGoods)
@@ -53,31 +55,20 @@ class MainActivityViewModel(private val app: Application, private var metrics: D
         val newWorkers = mutableListOf<Worker>()
 
         enumValues<Worker.Companion.WorkerSkin>().forEach {
-            newWorkers.add(Worker(app.applicationContext, it, calculateViewSize(), getRandomX(), getRandomY()))
+            newWorkers.add(
+                Worker(app.applicationContext,
+                    it,
+                    screenHelper.calculateViewSize(),
+                    screenHelper.getRandomX(),
+                    screenHelper.getRandomY())
+            )
         }
 
         _workers.postValue(newWorkers)
     }
 
-    fun updateMetrics(newMetrics: DisplayMetrics) {
-        metrics = newMetrics
-    }
-
-    fun getRandomX(min: Int = 0, max: Int = getMaxX()): Float = (min..max).random().toFloat()
-
-    fun getRandomY(min: Int = 0, max: Int = getMaxY()): Float = (min..max).random().toFloat()
-
-    fun getMaxX(): Int = metrics.widthPixels - calculateViewSize()
-
-    fun getMaxY(): Int = metrics.heightPixels - getStatusBarHeight() - calculateViewSize()
-
-    fun calculateViewSize(): Int =
-        (setOf(metrics.widthPixels, metrics.heightPixels).min() ?: DEFAULT_SCREEN_SIZE) / 10
-
-    private fun getStatusBarHeight(): Int {
-        val resourceId = app.applicationContext.resources.getIdentifier("status_bar_height", "dimen", "android")
-        return if (resourceId > 0) app.applicationContext.resources.getDimensionPixelSize(resourceId)
-        else Rect().apply { (app.applicationContext as Activity).window.decorView.getWindowVisibleDisplayFrame(this) }.top
+    fun refreshScreenHelper(activity: Activity) {
+        screenHelper.updateActivity(activity)
     }
 
 }

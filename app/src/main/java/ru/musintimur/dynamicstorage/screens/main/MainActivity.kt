@@ -4,10 +4,8 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
-import android.graphics.Rect
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import android.util.DisplayMetrics
 import android.view.animation.LinearInterpolator
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
@@ -17,7 +15,7 @@ import ru.musintimur.dynamicstorage.R
 import ru.musintimur.dynamicstorage.objects.Figure
 import ru.musintimur.dynamicstorage.objects.Figure.Good
 import ru.musintimur.dynamicstorage.objects.Figure.Worker
-import ru.musintimur.dynamicstorage.objects.characteristics.ScreenSide
+import ru.musintimur.dynamicstorage.objects.graphic.ScreenHelper
 import kotlin.math.pow
 import kotlin.math.sqrt
 
@@ -26,8 +24,13 @@ private const val OBSERVING_PERIOD = 500L
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var mainActivityViewModel: MainActivityViewModel
-    private lateinit var displayMetrics: DisplayMetrics
+    private val screenHelper: ScreenHelper by lazy { ScreenHelper(this) }
+    private val mainActivityViewModel: MainActivityViewModel by lazy {
+        ViewModelProvider(
+            this,
+            MainActivityViewModelFactory(application, screenHelper)
+        ).get(MainActivityViewModel::class.java)
+    }
     private lateinit var observerJob: Job
     private var goodsViews = mutableListOf<Good>()
     private var workersViews = mutableListOf<Worker>()
@@ -36,26 +39,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        refreshMetrics()
-
-        mainActivityViewModel =
-            ViewModelProvider(
-                this,
-                MainActivityViewModelFactory(application, displayMetrics)
-            ).get(MainActivityViewModel::class.java)
-
-        val owner = this
-
-        mainActivityViewModel.run {
-            getGoods().observe(owner, Observer {
-                updateGoods(it)
-            })
-
-            getWorkers().observe(owner, Observer {
-                updateWorkers(it)
-            })
-        }
+        setupObservers()
     }
 
     override fun onPause() {
@@ -68,10 +52,26 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshMetrics()
-        mainActivityViewModel.startProducingGoods()
-        mainActivityViewModel.setupWorkers()
+        mainActivityViewModel.run {
+            refreshScreenHelper(this@MainActivity)
+            startProducingGoods()
+            setupWorkers()
+        }
         startObservingIntersects()
+    }
+
+    private fun setupObservers() {
+        val owner = this
+
+        mainActivityViewModel.run {
+            getGoods().observe(owner, Observer {
+                updateGoods(it)
+            })
+
+            getWorkers().observe(owner, Observer {
+                updateWorkers(it)
+            })
+        }
     }
 
     private fun clearGoods() {
@@ -110,17 +110,8 @@ class MainActivity : AppCompatActivity() {
         addWorkers(newWorkers)
     }
 
-    private fun refreshMetrics() {
-        val metrics = DisplayMetrics()
-        this.windowManager.defaultDisplay.getMetrics(metrics)
-        displayMetrics = metrics
-        if (::mainActivityViewModel.isInitialized) {
-            mainActivityViewModel.updateMetrics(metrics)
-        }
-    }
-
     fun moveFigure(figure: Figure) {
-        val newCoordinates = getNewCoordinates(figure)
+        val newCoordinates = screenHelper.getNewCoordinates(figure)
         val distance = sqrt((newCoordinates.first - figure.x).pow(2) + (newCoordinates.second - figure.y).pow(2))
         val duration = BASE_DURATION * (distance / figure.speed).toLong()
 
@@ -151,54 +142,6 @@ class MainActivity : AppCompatActivity() {
         duration = animationDuration
     }
 
-    private fun getNewCoordinates(figure: Figure): Pair<Float, Float> {
-        val currentSide = getCurrentSide(figure)
-        val newSide = chooseNewScreenSide(currentSide)
-        val marginX = getMarginX(currentSide)
-        val marginY = getMarginY(currentSide)
-
-        mainActivityViewModel.run {
-            return when (newSide) {
-                ScreenSide.TOP -> Pair(getRandomX(marginX.first, marginX.second), 0f)
-                ScreenSide.BOTTOM -> Pair(getRandomX(marginX.first, marginX.second), getMaxY().toFloat())
-                ScreenSide.LEFT -> Pair(0f, getRandomY(marginY.first, marginY.second))
-                ScreenSide.RIGHT -> Pair(getMaxX().toFloat(), getRandomY(marginY.first, marginY.second))
-                else -> Pair(getRandomX(marginX.first, marginX.second), getRandomY(marginY.first, marginY.second))
-            }
-        }
-    }
-
-    private fun getCurrentSide(figure: Figure): ScreenSide = when {
-        figure.x <= mainActivityViewModel.calculateViewSize() -> ScreenSide.LEFT
-        figure.x >= mainActivityViewModel.getMaxX() - mainActivityViewModel.calculateViewSize() -> ScreenSide.RIGHT
-        figure.y <= mainActivityViewModel.calculateViewSize() -> ScreenSide.TOP
-        figure.y >= mainActivityViewModel.getMaxY() - mainActivityViewModel.calculateViewSize() -> ScreenSide.BOTTOM
-        else -> ScreenSide.NOT_A_SIDE
-    }
-
-    private fun chooseNewScreenSide(currentSide: ScreenSide): ScreenSide =
-        enumValues<ScreenSide>().filter { it !in setOf(currentSide, ScreenSide.NOT_A_SIDE) }.random()
-
-    private fun getMarginX(currentSide: ScreenSide): Pair<Int, Int> {
-        mainActivityViewModel.run {
-            return when (currentSide) {
-                ScreenSide.LEFT -> Pair(getMaxX() / 2, getMaxX())
-                ScreenSide.RIGHT -> Pair(0, getMaxX() / 2)
-                else -> Pair(0, getMaxX())
-            }
-        }
-    }
-
-    private fun getMarginY(currentSide: ScreenSide): Pair<Int, Int> {
-        mainActivityViewModel.run {
-            return when (currentSide) {
-                ScreenSide.TOP -> Pair(getMaxY() / 2, getMaxY())
-                ScreenSide.BOTTOM -> Pair(0, getMaxY() / 2)
-                else -> Pair(0, getMaxY())
-            }
-        }
-    }
-
     private fun startObservingIntersects() {
         if (!isObserving) {
             isObserving = true
@@ -207,7 +150,7 @@ class MainActivity : AppCompatActivity() {
                     val caughtGoods = mutableSetOf<Good>()
                     workersViews.forEach { worker ->
                         goodsViews.forEach { good ->
-                            if (worker > good && checkIntersects(worker, good)) {
+                            if (worker > good && screenHelper.checkIntersects(worker, good)) {
                                 caughtGoods.add(good)
                             }
                         }
@@ -230,14 +173,4 @@ class MainActivity : AppCompatActivity() {
             observerJob.cancel()
         }
     }
-
-    private fun checkIntersects(worker: Worker, good: Good): Boolean {
-        val workerRect = getFigureRect(worker)
-        val goodRect = getFigureRect(good)
-        return Rect.intersects(workerRect, goodRect)
-    }
-
-    private fun getFigureRect(figure: Figure): Rect =
-        Rect(figure.x.toInt(), figure.y.toInt(), figure.x.toInt() + figure.width, figure.y.toInt() + figure.height)
-
 }
