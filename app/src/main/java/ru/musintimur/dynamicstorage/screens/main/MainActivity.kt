@@ -10,7 +10,6 @@ import android.view.animation.LinearInterpolator
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.android.synthetic.main.activity_main.*
-import kotlinx.coroutines.*
 import ru.musintimur.dynamicstorage.R
 import ru.musintimur.dynamicstorage.objects.Figure
 import ru.musintimur.dynamicstorage.objects.Figure.Good
@@ -20,7 +19,6 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 private const val BASE_DURATION = 50L
-private const val OBSERVING_PERIOD = 500L
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,10 +29,8 @@ class MainActivity : AppCompatActivity() {
             MainActivityViewModelFactory(application, screenHelper)
         ).get(MainActivityViewModel::class.java)
     }
-    private lateinit var observerJob: Job
     private var goodsViews = mutableListOf<Good>()
     private var workersViews = mutableListOf<Worker>()
-    private var isObserving = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,8 +40,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        mainActivityViewModel.stopProduceGoods()
-        stopObservingIntersects()
         clearGoods()
         clearWorkers()
     }
@@ -54,10 +48,10 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         mainActivityViewModel.run {
             refreshScreenHelper(this@MainActivity)
-            startProducingGoods()
             setupWorkers()
+            startProducingGoods()
+            startObservingIntersects()
         }
-        startObservingIntersects()
     }
 
     private fun setupObservers() {
@@ -70,6 +64,10 @@ class MainActivity : AppCompatActivity() {
 
             getWorkers().observe(owner, Observer {
                 updateWorkers(it)
+            })
+
+            getCaughtGood().observe(owner, Observer {
+                removeGoods(it)
             })
         }
     }
@@ -90,6 +88,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateGoods(newGoods: List<Good>) {
         clearGoods()
         addGoods(newGoods)
+    }
+
+    private fun removeGoods(goods: List<Good>) {
+        goods.forEach {
+            activityMainLayout.removeView(it)
+            goodsViews.remove(it)
+        }
     }
 
     private fun clearWorkers() {
@@ -140,37 +145,5 @@ class MainActivity : AppCompatActivity() {
     ): ObjectAnimator = ObjectAnimator.ofFloat(figure, propertyName, startValue, endValue).apply {
         interpolator = LinearInterpolator()
         duration = animationDuration
-    }
-
-    private fun startObservingIntersects() {
-        if (!isObserving) {
-            isObserving = true
-            observerJob = CoroutineScope(Dispatchers.Default).launch {
-                while (isObserving) {
-                    val caughtGoods = mutableSetOf<Good>()
-                    workersViews.forEach { worker ->
-                        goodsViews.forEach { good ->
-                            if (worker > good && screenHelper.checkIntersects(worker, good)) {
-                                caughtGoods.add(good)
-                            }
-                        }
-                    }
-                    withContext(Dispatchers.Main) {
-                        caughtGoods.forEach {
-                            activityMainLayout.removeView(it)
-                            goodsViews.remove(it)
-                        }
-                    }
-                    delay(OBSERVING_PERIOD)
-                }
-            }
-        }
-    }
-
-    private fun stopObservingIntersects() {
-        isObserving = false
-        if (::observerJob.isInitialized) {
-            observerJob.cancel()
-        }
     }
 }

@@ -5,30 +5,37 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import ru.musintimur.dynamicstorage.objects.Figure.Good
 import ru.musintimur.dynamicstorage.objects.Figure.Worker
 import ru.musintimur.dynamicstorage.objects.graphic.ScreenHelper
 
+private const val GOODS_COUNT = 10
+private const val REFRESH_PERIOD = 10_000L
+private const val OBSERVING_PERIOD = 500L
+
 class MainActivityViewModel(private val app: Application, private val screenHelper: ScreenHelper) : AndroidViewModel(app) {
 
     private val _goods = MutableLiveData<List<Good>>()
     private val _workers = MutableLiveData<List<Worker>>()
-    private lateinit var producerJob: Job
     private var isProducing = false
+    private var isObserving = false
+    private val _caughtGoods = MutableLiveData<List<Good>>()
 
     fun getGoods(): LiveData<List<Good>> = _goods
     fun getWorkers(): LiveData<List<Worker>> = _workers
+    fun getCaughtGood(): LiveData<List<Good>> = _caughtGoods
 
     fun startProducingGoods() {
         if (!isProducing) {
             isProducing = true
 
-            producerJob = CoroutineScope(Dispatchers.Default).launch {
+            viewModelScope.launch {
                 while (isProducing) {
                     val newGoods = mutableListOf<Good>()
 
-                    repeat(10) {
+                    repeat(GOODS_COUNT) {
                         newGoods.add(
                             Good(app.applicationContext,
                                 screenHelper.calculateViewSize(),
@@ -38,16 +45,9 @@ class MainActivityViewModel(private val app: Application, private val screenHelp
                     }
 
                     _goods.postValue(newGoods)
-                    delay(10_000)
+                    delay(REFRESH_PERIOD)
                 }
             }
-        }
-    }
-
-    fun stopProduceGoods() {
-        isProducing = false
-        if (::producerJob.isInitialized) {
-            producerJob.cancel()
         }
     }
 
@@ -71,4 +71,23 @@ class MainActivityViewModel(private val app: Application, private val screenHelp
         screenHelper.updateActivity(activity)
     }
 
+    fun startObservingIntersects() {
+        if (!isObserving) {
+            isObserving = true
+            viewModelScope.launch {
+                while (isObserving) {
+                    val caughtGoods = mutableListOf<Good>()
+                    _workers.value?.forEach { worker ->
+                        _goods.value?.forEach { good ->
+                            if (worker > good && screenHelper.checkIntersects(worker, good)) {
+                                caughtGoods.add(good)
+                            }
+                        }
+                    }
+                    _caughtGoods.postValue(caughtGoods)
+                    delay(OBSERVING_PERIOD)
+                }
+            }
+        }
+    }
 }
